@@ -67,8 +67,8 @@ public class JedisIndex {
 	 * @return Set of URLs.
 	 */
 	public Set<String> getURLs(String term) {
-        // FILL THIS IN!
-		return null;
+        
+		return jedis.smembers(urlSetKey(term));
 	}
 
     /**
@@ -78,8 +78,12 @@ public class JedisIndex {
 	 * @return Map from URL to count.
 	 */
 	public Map<String, Integer> getCounts(String term) {
-        // FILL THIS IN!
-		return null;
+		Map<String, Integer> urlCounts = new HashMap<String, Integer>();
+        Set<String> urls = getURLs(term);
+        for(String url: urls) {
+			urlCounts.put(url, getCount(url, term));
+        }
+		return urlCounts;
 	}
 
     /**
@@ -90,8 +94,14 @@ public class JedisIndex {
 	 * @return
 	 */
 	public Integer getCount(String url, String term) {
-        // FILL THIS IN!
-		return null;
+	  	String termCount = jedis.hget(termCounterKey(url), term);
+		int count = 0;
+		try {
+			count = Integer.parseInt(termCount);
+		} catch(NumberFormatException exception) {
+			exception.printStackTrace();
+		}
+		return count;
 	}
 
 
@@ -102,8 +112,44 @@ public class JedisIndex {
 	 * @param paragraphs  Collection of elements that should be indexed.
 	 */
 	public void indexPage(String url, Elements paragraphs) {
-        // FILL THIS IN!
+        if(isIndexed(url)) {
+        	removeIndexedPage(url);
+        }
+
+        TermCounter tc = new TermCounter(url);
+		tc.processElements(paragraphs);
+		
+		// for each term in the TermCounter, update urlSet
+		//Add the term counter to jedis
+		Transaction transaction = jedis.multi();
+		String tcKey = termCounterKey(url);
+		for (String term: tc.keySet()) {
+			transaction.sadd(urlSetKey(term), url);
+			transaction.hset(tcKey, term, Integer.toString(tc.get(term)));
+		}
+		transaction.exec();
 	}
+
+	/**
+	 * Removes the index  content of a given url from jedis
+	 *
+	 */
+	private void removeIndexedPage(String url) {
+		//Get TermCounter Map
+		Map<String, String> tcMap = jedis.hgetAll(termCounterKey(url));
+		
+		//Remove url form urlSet for the term
+		Transaction urlSetRemover = jedis.multi();
+		for(String term: tcMap.keySet()) {
+			urlSetRemover.srem(urlSetKey(term), url);
+		}
+		urlSetRemover.exec();
+
+		//Remove TermCounter for the url
+		jedis.del(termCounterKey(url));
+
+	}
+
 
 	/**
 	 * Prints the contents of the index.
